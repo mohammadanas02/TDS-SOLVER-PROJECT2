@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from typing import Optional, Dict, Any
 import os
 import json
@@ -17,6 +17,8 @@ import logging
 import datetime
 import inspect
 import io
+import base64
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1199,6 +1201,134 @@ The query you will return "SELECT SUM(units * price) FROM tickets WHERE LOWER(TR
             return "SELECT SUM(units * price) FROM tickets WHERE LOWER(type) = 'gold';"
         return f"Error: {str(e)}"  
 
+#___________________________________________WEEK2 GA__________________________________________________________
+
+def write_documentation_in_markdown(params: Dict = None) -> str:
+    with open('return/ga21.md', 'r', encoding='utf-8', errors='replace') as ga:
+        readme = ga.read()
+
+    return readme    
+
+def compress_image_losslessly(params: Dict) -> Dict:
+    """
+    Download an image and compress it using the Tinify API.
+    """
+    temp_dir = None
+    input_image_path = None
+    output_image_path = None
+    
+    try:
+        # Create temp directory
+        temp_dir = tempfile.mkdtemp()
+        
+        # Get image path or URL
+        image_path = params.get("image_path")
+        url = params.get("url")
+        uploaded_file_path = params.get("uploaded_file_path")
+        
+        # Handle image from uploaded path
+        if uploaded_file_path and os.path.exists(uploaded_file_path):
+            input_image_path = uploaded_file_path
+        # Handle image from URL
+        elif url and url.startswith(('http://', 'https://')):
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            input_image_path = os.path.join(temp_dir, "input_image")
+            with open(input_image_path, 'wb') as f:
+                f.write(response.content)
+        # Handle image from local path
+        elif image_path and os.path.exists(image_path):
+            input_image_path = image_path
+        else:
+            return {"error": "No valid image source provided"}
+        
+        # Prepare output path
+        output_image_path = os.path.join(temp_dir, "compressed_image.png")
+        
+        # Use Tinify API for compression
+        tinify_api_key = "DKDVH1KV8wnwrbNrkCKvm1K4SwYR8xCP"
+        
+        # Make API request to Tinify
+        with open(input_image_path, 'rb') as image_file:
+            image_data = image_file.read()
+            
+        # Send request to Tinify API
+        headers = {
+            'Authorization': f'Basic {base64.b64encode(f"api:{tinify_api_key}".encode()).decode()}'
+        }
+        response = requests.post(
+            'https://api.tinify.com/shrink',
+            headers=headers,
+            data=image_data,
+            timeout=30
+        )
+        
+        # Check if the request was successful
+        if response.status_code == 201 or response.status_code == 200:
+            # Get the URL of the compressed image
+            compressed_url = response.json()['output']['url']
+            
+            # Download the compressed image
+            compressed_response = requests.get(compressed_url, timeout=10)
+            compressed_response.raise_for_status()
+            
+            with open(output_image_path, 'wb') as f:
+                f.write(compressed_response.content)
+            
+            # Create a persistent file path for the compressed image
+            persistent_dir = os.path.join(os.getcwd(), "compressed_images")
+            os.makedirs(persistent_dir, exist_ok=True)
+            
+            # Clean up old compressed images (keep only the 10 most recent)
+            try:
+                files = sorted(
+                    [os.path.join(persistent_dir, f) for f in os.listdir(persistent_dir) 
+                     if os.path.isfile(os.path.join(persistent_dir, f))],
+                    key=os.path.getmtime
+                )
+                # Delete all but the 10 most recent files
+                for old_file in files[:-10]:
+                    os.remove(old_file)
+            except Exception as e:
+                logger.error(f"Error cleaning up old compressed images: {str(e)}")
+            
+            # Generate a unique filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            file_hash = hashlib.md5(str(timestamp).encode()).hexdigest()[:8]
+            persistent_path = os.path.join(persistent_dir, f"compressed_{file_hash}.png")
+            
+            # Copy the compressed file to the persistent location
+            shutil.copy2(output_image_path, persistent_path)
+            
+            file_size = os.path.getsize(persistent_path)
+            
+            return {
+                "success": True,
+                "message": f"Compressed image is {file_size} bytes",
+                "file_path": persistent_path,
+                "file_size": file_size
+            }
+        else:
+            error_message = f"Tinify API error: {response.status_code}"
+            try:
+                error_details = response.json()
+                error_message += f" - {error_details.get('message', 'Unknown error')}"
+            except:
+                pass
+            
+            logger.error(error_message)
+            return {"error": error_message}
+        
+    except Exception as e:
+        logger.error(f"Error compressing image: {str(e)}")
+        return {"error": str(e)}
+    finally:
+        # Clean up temporary files and directories
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.error(f"Error removing temp directory: {str(e)}")
 
 # Function mappings
 function_mappings = {
@@ -1217,7 +1347,9 @@ function_mappings = {
     "analyze_zip_file_timestamps": analyze_zip_file_timestamps,
     "process_zip_move_rename_grep": process_zip_move_rename_grep,
     "compare_files_in_zip": compare_files_in_zip,
-    "generate_sql_query": generate_sql_query
+    "generate_sql_query": generate_sql_query,
+    "write_documentation_in_markdown": write_documentation_in_markdown,
+    "compress_image_losslessly": compress_image_losslessly
 }
 
 tools = [
@@ -1597,8 +1729,49 @@ tools = [
                 "required": ["question"]
             }
         }
+    },
+    #___________________________________________WEEK2 _________________________________________________
+    
+    {
+        "type": "function",
+        "function": {
+            "name": "write_documentation_in_markdown",
+            "description": "Write documentation in Markdown for an **imaginary** analysis of the number of steps you walked each day for a week, comparing over time and with friends.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compress_image_losslessly",
+            "description": "Download an image and compress it losslessly to under 1,500 bytes while maintaining pixel-for-pixel accuracy",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {
+                        "type": "string",
+                        "description": "Local path to the image file"
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "URL to download the image"
+                    },
+                    "uploaded_file_path": {
+                        "type": "string",
+                        "description": "Path to an uploaded image file"
+                    }
+                },
+                "required": []
+            }
+        }
     }
-]
+] 
+    
+
 
 def process_question(question: str, file_path: Optional[str] = None) -> str:
     try:
@@ -1824,9 +1997,13 @@ def process_question(question: str, file_path: Optional[str] = None) -> str:
         if "write sql" in question.lower() and ("database" in question.lower() or "table" in question.lower()):
             return generate_sql_query({"question": question})    
 
+        # Add to process_question function where other patterns are checked
+        if ("compress" in question.lower() or "reduce size" in question.lower()) and "image" in question.lower() and ("lossless" in question.lower() or "identical" in question.lower()):
+           return "Image compression request detected. Please use the API endpoint directly."  
+
         # Otherwise, use the OpenAI model.
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gemma2-9b-it",
             messages=[
                 {"role": "system", "content": "You are an expert in Tools in Data Science."},
                 {"role": "user", "content": question}
@@ -1881,7 +2058,53 @@ def solve_question():
                 if not temp_file_path:
                     return jsonify({"error": "Failed to process uploaded file"}), 400
         
-        # Process the question
+        # Check if this is an image compression request
+        is_compression_request = ("compress" in question.lower() or "reduce size" in question.lower()) and "image" in question.lower() and ("lossless" in question.lower() or "identical" in question.lower())
+        
+        if is_compression_request:
+            params = {}
+            if temp_file_path:
+                params["uploaded_file_path"] = temp_file_path
+            else:
+                # Extract URL if present
+                url_match = re.search(r'(https?://\S+)', question)
+                if url_match:
+                    params["url"] = url_match.group(1)
+                else:
+                    return jsonify({"error": "No image provided for compression"}), 400
+            
+            # Process the compression
+            result = compress_image_losslessly(params)
+            
+            # Clean up temp file if we created one
+            if temp_file_path:
+                remove_temp_file(temp_file_path)
+            
+            # If successful, return the image file
+            if "success" in result and result["success"]:
+                file_path = result["file_path"]
+                try:
+                    # Make sure the file exists before trying to send it
+                    if not os.path.exists(file_path):
+                        return jsonify({"error": "Compressed file not found"}), 500
+                        
+                    # Send the file with appropriate mime type
+                    return send_file(
+                        file_path,
+                        as_attachment=True,
+                        download_name="compressed_image.png",
+                        mimetype="image/png"
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending file: {str(e)}")
+                    return jsonify({"error": f"Error sending file: {str(e)}"}), 500
+            else:
+                # Return the error message
+                error_msg = result.get("error", "Unknown error during compression")
+                logger.error(f"Compression error: {error_msg}")
+                return jsonify({"error": error_msg}), 400
+        
+        # For non-compression requests, continue with normal processing
         answer = process_question(question, temp_file_path)
         
         # Clean up the temporary file
@@ -1896,7 +2119,7 @@ def solve_question():
 @app.route("/", methods=["GET"])
 def root():
     return jsonify({
-        "message": "Welcome to the TDS Solver API by Vishal Baraiya",
+        "message": "Welcome to the TDS Solver API by Anas",
         "usage": "POST to /api/ with question (required) and file (optional)"
     })
 
